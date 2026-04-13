@@ -1,84 +1,20 @@
 import React, { useState, useMemo, useEffect, useCallback } from "react";
+import { useParams } from "react-router-dom";
 
-/* ─────────────── XANO API INTEGRATION LAYER ─────────────── */
-// In production, replace XANO_BASE with your workspace URL.
-// All endpoints follow REST conventions; auth via Xano auth token in headers.
-const XANO_BASE = "https://xria-ip7c-otef.n7e.xano.io/api:sku-velocity";
-const USE_MOCK = true; // flip to false when Xano endpoints are live
-
-// Generic fetch wrapper — returns mock data when USE_MOCK=true
-const xanoFetch = async (endpoint, options = {}) => {
-  if (USE_MOCK) return null; // caller falls back to mock data
-  const res = await fetch(`${XANO_BASE}${endpoint}`, {
-    headers: { "Content-Type": "application/json", /* "Authorization": "Bearer <token>" */ },
-    ...options,
-  });
-  if (!res.ok) throw new Error(`Xano ${endpoint}: ${res.status}`);
-  return res.json();
-};
-
-// Hook: fetch SKU detail (marketplace_sku + components + inventory + velocity)
-// Endpoint: GET /api/sku_velocity/detail?marketplace_sku_id=X
-const useSkuDetail = (skuId) => {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(!USE_MOCK);
-  useEffect(() => {
-    if (USE_MOCK) return;
-    xanoFetch(`/detail?marketplace_sku_id=${skuId}`).then(d => { setData(d); setLoading(false); });
-  }, [skuId]);
-  return { data, loading };
-};
-
-// Hook: fetch period metrics (actual + forecast)
-// Endpoint: GET /api/sku_velocity/metrics?marketplace_sku_id=X&period=Y
-const useSkuMetrics = (skuId, period, customStart, customEnd) => {
-  const [data, setData] = useState(null);
-  useEffect(() => {
-    if (USE_MOCK) return;
-    const params = `marketplace_sku_id=${skuId}&period=${period}` +
-      (period === "custom" ? `&start_date=${customStart}&end_date=${customEnd}` : "");
-    xanoFetch(`/metrics?${params}`).then(setData);
-  }, [skuId, period, customStart, customEnd]);
-  return data; // { actual: {...}, forecast: {...} }
-};
-
-// Hook: fetch category fees from category_fees table
-// Endpoint: GET /api/category_fees?category=X&channel=Y
-const useCategoryFees = (category, channel) => {
-  const [fees, setFees] = useState(null);
-  useEffect(() => {
-    if (USE_MOCK) return;
-    xanoFetch(`/category_fees?category=${category}&channel=${channel}`).then(setFees);
-  }, [category, channel]);
-  return fees;
-};
-
-// Hook: post recommendation feedback
-// Endpoint: POST /api/recommendation_feedback
-const useRecommendationFeedback = () => {
-  return useCallback(async (recId, decision, reason, skuId) => {
-    if (USE_MOCK) return;
-    return xanoFetch("/recommendation_feedback", {
-      method: "POST",
-      body: JSON.stringify({ rec_id: recId, decision, reason, marketplace_sku_id: skuId }),
-    });
-  }, []);
-};
-
-// Hook: create price test
-// Endpoint: POST /api/price_tests
-const useCreatePriceTest = () => {
-  return useCallback(async (skuId, testType, pricePoints, startDate, endDate, override = false, overrideReason = null) => {
-    if (USE_MOCK) return { status: "pending_approval", id: "mock_" + Date.now() };
-    return xanoFetch("/price_tests", {
-      method: "POST",
-      body: JSON.stringify({
-        marketplace_sku_id: skuId, test_type: testType, price_points: pricePoints,
-        planned_start_date: startDate, planned_end_date: endDate, override, override_reason: overrideReason,
-      }),
-    });
-  }, []);
-};
+/* ─────────────── XANO API INTEGRATION ───────────────
+ * All hooks are imported from src/api/hooks.js so the live API path,
+ * mappers, and mock-fallback logic live in exactly one place. The
+ * previous inline definitions in this file hardcoded USE_MOCK=true and
+ * pointed at a non-existent /api:sku-velocity group, which kept the
+ * Detail page on synthetic data even after the real workspace was wired.
+ */
+import {
+  useSkuDetail,
+  useSkuMetrics,
+  useCategoryFees,
+  useRecommendationFeedback,
+  useCreatePriceTest,
+} from "../api/hooks";
 
 /* ─────────────── THEME + HELPERS ─────────────── */
 
@@ -158,7 +94,10 @@ const PAST_VELOCITY = Array.from({length: 30}, (_, i) => ({
   contrib: 380 + Math.sin(i/2)*80 + (Math.random()-0.5)*40,
 }));
 
-const SKU = {
+// Mock SKU baseline. The main detail component shadows this with API-overlaid
+// data when useSkuDetail returns a row; helper components that reference SKU
+// via closure still see this mock (legacy props pass the live overlay through).
+const SKU_MOCK = {
   name: 'Essential 10" Queen',
   marketplace_sku: 'SS-Q-AB+MA+ESS+10"',
   asin: 'B0863CMF8F',
@@ -419,7 +358,7 @@ function MarginCalc({ landed, shipping, serviceFee, adSpend, units30d, testPrice
           </div>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-          {renderPanel("Amazon", amzLines, amzNet, amzMargin, T.amz, "ASIN: "+SKU.asin)}
+          {renderPanel("Amazon", amzLines, amzNet, amzMargin, T.amz, "ASIN: "+SKU_MOCK.asin)}
           {renderPanel("Shopify (Online)", shopLines, onlineNet, onlineMargin, T.shop, "mirrored price")}
         </div>
         <div style={{background:T.bg,borderRadius:6,padding:"10px 12px",border:"1px solid "+T.bd,marginBottom:10}}>
@@ -495,8 +434,8 @@ function PriceHistoryAndTests({ recs, rejectingId, reasonText, setReasonText, on
           const velNorm = h.velocity / maxVel;
           return (
             <div key={i} style={{display:"grid",gridTemplateColumns:"68px 40px 40px 52px 44px 52px 44px 56px 56px 40px",gap:6,padding:"5px 0",borderBottom:"1px solid "+T.bd+"40",fontSize:10,fontFamily:"'JetBrains Mono', monospace",alignItems:"center"}}>
-              <div style={{color:h.price===SKU.buybox_price?T.am:T.t1,fontWeight:h.price===SKU.buybox_price?700:400}}>
-                {fc(h.price)}{h.price===SKU.buybox_price && <span style={{fontSize:7,color:T.am,marginLeft:2}}>●</span>}
+              <div style={{color:h.price===SKU_MOCK.buybox_price?T.am:T.t1,fontWeight:h.price===SKU_MOCK.buybox_price?700:400}}>
+                {fc(h.price)}{h.price===SKU_MOCK.buybox_price && <span style={{fontSize:7,color:T.am,marginLeft:2}}>●</span>}
               </div>
               <div style={{textAlign:"right",color:T.t2}}>{h.days}d</div>
               <div style={{textAlign:"right",color:T.t3,fontSize:9}}>{h.start}</div>
@@ -1763,7 +1702,7 @@ const DATE_PERIODS = [
 // Mock period-adjusted metrics (in production, fetched from GET /api/sku_velocity/metrics?sku_id=X&period=Y)
 // Each period has actual + forecast variants of 9 metrics:
 //   units, velocity, adSpend, revenue, acos (adSpend/revenue), impressions, clicks, cvr, margin
-const PERIOD_METRICS = {
+const PERIOD_METRICS_MOCK = {
   today:     { units: 5,    velocity: 5.0, adSpend: 114,   revenue: 6025,    acos: 1.89,  impressions: 2140,    clicks: 48,    cvr: 1.04, margin: 22.1 },
   yesterday: { units: 4,    velocity: 4.0, adSpend: 108,   revenue: 4820,    acos: 2.24,  impressions: 1980,    clicks: 42,    cvr: 0.92, margin: 21.4 },
   "7d":      { units: 30,   velocity: 4.3, adSpend: 798,   revenue: 36150,   acos: 2.21,  impressions: 14280,   clicks: 312,   cvr: 0.96, margin: 21.8 },
@@ -1780,7 +1719,7 @@ const PERIOD_METRICS = {
 
 // Forecasted metrics (in production, from GET /api/sku_velocity/forecast?sku_id=X&period=Y)
 // Forecast is generated by compute_velocity_metrics cron using trailing trends + seasonality + promo calendar
-const FORECAST_METRICS = {
+const FORECAST_METRICS_MOCK = {
   today:     { units: 5,    velocity: 4.8, adSpend: 118,   revenue: 5784,    acos: 2.04,  impressions: 2080,    clicks: 46,    cvr: 0.98, margin: 21.4 },
   yesterday: { units: 4,    velocity: 4.2, adSpend: 112,   revenue: 5064,    acos: 2.21,  impressions: 2020,    clicks: 44,    cvr: 0.95, margin: 21.2 },
   "7d":      { units: 32,   velocity: 4.6, adSpend: 826,   revenue: 38566,   acos: 2.14,  impressions: 14800,   clicks: 328,   cvr: 1.00, margin: 22.2 },
@@ -1796,6 +1735,7 @@ const FORECAST_METRICS = {
 };
 
 export default function SkuVelocityDetail() {
+  const { skuId } = useParams();
   const [testPrice, setTestPrice] = useState(null);
   const [recs, setRecs] = useState(PRICE_TEST_RECS);
   const [rejectingTestId, setRejectingTestId] = useState(null);
@@ -1804,12 +1744,50 @@ export default function SkuVelocityDetail() {
   const [showCustomCal, setShowCustomCal] = useState(false);
   const [customStart, setCustomStart] = useState("2026-03-11");
   const [customEnd, setCustomEnd] = useState("2026-04-10");
+
+  // Pull live data from Xano (with mock fallback baked into the shared hooks).
+  const { data: skuApi } = useSkuDetail(skuId);
+  const { data: metricsApi } = useSkuMetrics(skuId, datePeriod, customStart, customEnd);
+
+  // SKU overlay: prefer API fields, fall back to mock for anything not yet
+  // returned by the live endpoint (e.g. the rich `components` array).
+  const SKU = useMemo(() => {
+    if (!skuApi) return SKU_MOCK;
+    return {
+      ...SKU_MOCK,
+      ...skuApi,
+      // Component list is a richer object than what /detail returns today —
+      // keep the mock unless the API actually delivered an array.
+      components: Array.isArray(skuApi.components) && skuApi.components.length
+        ? skuApi.components
+        : SKU_MOCK.components,
+    };
+  }, [skuApi]);
+
+  // useCategoryFees called *after* SKU is materialized so we pass live category/channel.
+  const { fees: feesApi } = useCategoryFees(SKU.category || "default", SKU.channel || "amazon");
+
+  // Map API metrics (snake_case) into the camelCase shape the existing layout expects.
+  const mapApiMetrics = (m) => m && {
+    units: m.units ?? 0,
+    velocity: m.velocity ?? 0,
+    adSpend: m.ad_spend ?? m.adSpend ?? 0,
+    revenue: m.revenue ?? 0,
+    acos: m.acos ?? 0,
+    impressions: m.impressions ?? 0,
+    clicks: m.clicks ?? 0,
+    cvr: m.cvr ?? 0,
+    margin: m.margin ?? m.margin_pct ?? 0,
+  };
+  const apiActual = mapApiMetrics(metricsApi?.actual);
+  const apiForecast = mapApiMetrics(metricsApi?.forecast);
+  const pm = apiActual || PERIOD_METRICS_MOCK[datePeriod];
+  const pfm = apiForecast || FORECAST_METRICS_MOCK[datePeriod];
+
   const landedTotal = SKU.components.reduce((s, c) => s + c.cost * c.qty, 0);
   const shipping = 168.26;
-  const serviceFee = 0.06;
+  const serviceFee = feesApi?.service_fee_pct ?? 0.06;
   const nextP = nextPromo();
-  const pm = PERIOD_METRICS[datePeriod];
-  const pfm = FORECAST_METRICS[datePeriod];
   const periodLabel = datePeriod === "custom" ? `${customStart} — ${customEnd}` : DATE_PERIODS.find(p=>p.key===datePeriod)?.label || datePeriod;
   
   const handleApprove = (id) => {
