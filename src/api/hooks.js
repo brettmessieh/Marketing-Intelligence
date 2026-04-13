@@ -248,35 +248,67 @@ const mapDetailSku = (sku) => {
   };
 };
 
-// Aggregate an array of daily rows from Xano metrics.actuals[] into a single
-// summary object that matches the frontend's metrics.actual contract.
+// Aggregate an array of daily rows from Xano metrics.actuals[] (or .actual[])
+// into a single summary object that matches the frontend's metrics.actual
+// contract. Live Xano shape (verified 2026-04-13 against /detail):
+//   units_sold, gross_revenue, ad_spend, sessions, cvr (already %),
+//   impression_share, buybox_price, contribution, nb_incremental_revenue,
+//   nb_incremental_roas, impressions, clicks, acos (DECIMAL e.g. 0.0588),
+//   margin_pct, date.
+// We also accept the simpler legacy shape (units, revenue, margin, etc.) so
+// the same mapper works against mocks and any future endpoint variants.
 const aggregateActuals = (actuals) => {
   if (!Array.isArray(actuals) || actuals.length === 0) return null;
-  const sum = (k) => actuals.reduce((a, r) => a + (Number(r?.[k]) || 0), 0);
-  const avg = (k) => {
-    const xs = actuals.map((r) => Number(r?.[k])).filter((n) => Number.isFinite(n));
+  // Sort by date ascending so period_start/period_end land correctly even if
+  // the API returns rows in arbitrary order (it currently does).
+  const sorted = [...actuals].sort((a, b) =>
+    String(a?.date || "").localeCompare(String(b?.date || ""))
+  );
+  const sum = (...keys) => sorted.reduce((a, r) => {
+    for (const k of keys) {
+      const v = Number(r?.[k]);
+      if (Number.isFinite(v)) return a + v;
+    }
+    return a;
+  }, 0);
+  const avg = (...keys) => {
+    const xs = sorted
+      .map((r) => {
+        for (const k of keys) {
+          const v = Number(r?.[k]);
+          if (Number.isFinite(v)) return v;
+        }
+        return null;
+      })
+      .filter((n) => Number.isFinite(n));
     return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
   };
-  const units = sum("units");
-  const revenue = sum("revenue");
+  const units = sum("units_sold", "units");
+  const revenue = sum("gross_revenue", "revenue");
   const ad_spend = sum("ad_spend");
   const impressions = sum("impressions");
   const clicks = sum("clicks");
+  const sessions = sum("sessions");
+  // acos may already be % (mocks) or decimal (Xano). Detect by magnitude.
+  const acosAvgRaw = avg("acos");
+  const acosAvg = acosAvgRaw != null && acosAvgRaw < 1 ? acosAvgRaw * 100 : acosAvgRaw;
   return {
     units,
     revenue,
     ad_spend,
     impressions,
     clicks,
-    velocity: actuals.length ? units / actuals.length : 0,
-    cvr: clicks ? (units / clicks) * 100 : avg("cvr"),
-    acos: revenue ? (ad_spend / revenue) * 100 : avg("acos"),
-    margin: avg("margin"),
-    sessions: sum("sessions") || avg("sessions"),
+    sessions,
+    velocity: sorted.length ? units / sorted.length : 0,
+    cvr: avg("cvr") ?? (clicks ? (units / clicks) * 100 : null),
+    acos: revenue ? (ad_spend / revenue) * 100 : acosAvg,
+    margin: avg("margin_pct", "margin"),
+    contribution: sum("contribution"),
     nb_incremental_revenue: sum("nb_incremental_revenue"),
     nb_incremental_roas: avg("nb_incremental_roas"),
-    period_start: actuals[0]?.period_start ?? actuals[0]?.date ?? null,
-    period_end: actuals[actuals.length - 1]?.period_end ?? actuals[actuals.length - 1]?.date ?? null,
+    impression_share: avg("impression_share"),
+    period_start: sorted[0]?.date ?? sorted[0]?.period_start ?? null,
+    period_end: sorted[sorted.length - 1]?.date ?? sorted[sorted.length - 1]?.period_end ?? null,
   };
 };
 
