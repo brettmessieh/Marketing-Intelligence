@@ -216,16 +216,16 @@ const capitalizeChannel = (ch) => {
 
 const mapOverviewRow = (row) => ({
   id: row.id,
-  name: row.short_description || "",
+  name: row.short_description || row.name || "",
   channel: capitalizeChannel(row.channel),
   asinId: row.external_id || row.marketplace_sku || "",
   buyboxPrice: row.buybox_price ?? 0,
-  velocity30d: row.velocity ?? null,
-  units30d: row.units30d ?? null,
-  daysOfCover: row.daysOfCover ?? null,
+  velocity30d: row.velocity_30d ?? row.velocity ?? null,
+  units30d: row.units_30d ?? row.units30d ?? null,
+  daysOfCover: row.days_of_cover ?? row.daysOfCover ?? null,
   margin: row.avg_margin_pct ?? null,
   contribution: row.sum_contribution ?? null,
-  cvr: row.avg_cvr ?? null,
+  cvr: row.avg_cvr ?? row.cvr_30d ?? null,
   status: row.is_active === false ? "Inactive" : (row.status || "Active"),
   lifecycle: row.lifecycle
     ? row.lifecycle.charAt(0).toUpperCase() + row.lifecycle.slice(1)
@@ -233,6 +233,88 @@ const mapOverviewRow = (row) => ({
   // Preserve raw fields for detail navigation
   _raw: row,
 });
+
+// Map Xano /detail.sku response → front-end field names used by detail pages.
+// Xano stores: short_description, external_id, google_merchant_id, shopify_landing_path
+// UI expects:  name,              asin,        google_id,           shopify_path
+const mapDetailSku = (sku) => {
+  if (!sku || typeof sku !== "object") return sku;
+  return {
+    ...sku,
+    name: sku.short_description ?? sku.name ?? "",
+    asin: sku.external_id ?? sku.asin ?? "",
+    google_id: sku.google_merchant_id ?? sku.google_id ?? "",
+    shopify_path: sku.shopify_landing_path ?? sku.shopify_path ?? "",
+  };
+};
+
+// Aggregate an array of daily rows from Xano metrics.actuals[] into a single
+// summary object that matches the frontend's metrics.actual contract.
+const aggregateActuals = (actuals) => {
+  if (!Array.isArray(actuals) || actuals.length === 0) return null;
+  const sum = (k) => actuals.reduce((a, r) => a + (Number(r?.[k]) || 0), 0);
+  const avg = (k) => {
+    const xs = actuals.map((r) => Number(r?.[k])).filter((n) => Number.isFinite(n));
+    return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
+  };
+  const units = sum("units");
+  const revenue = sum("revenue");
+  const ad_spend = sum("ad_spend");
+  const impressions = sum("impressions");
+  const clicks = sum("clicks");
+  return {
+    units,
+    revenue,
+    ad_spend,
+    impressions,
+    clicks,
+    velocity: actuals.length ? units / actuals.length : 0,
+    cvr: clicks ? (units / clicks) * 100 : avg("cvr"),
+    acos: revenue ? (ad_spend / revenue) * 100 : avg("acos"),
+    margin: avg("margin"),
+    sessions: sum("sessions") || avg("sessions"),
+    nb_incremental_revenue: sum("nb_incremental_revenue"),
+    nb_incremental_roas: avg("nb_incremental_roas"),
+    period_start: actuals[0]?.period_start ?? actuals[0]?.date ?? null,
+    period_end: actuals[actuals.length - 1]?.period_end ?? actuals[actuals.length - 1]?.date ?? null,
+  };
+};
+
+// Map Xano /metrics or /detail.metrics → frontend shape {actual, forecast}.
+// Xano returns {actuals: [daily rows], forecast: {...}}; UI reads .actual (singular).
+const mapMetrics = (metrics) => {
+  if (!metrics || typeof metrics !== "object") return metrics;
+  const actualSrc = metrics.actuals ?? metrics.actual;
+  const actual = Array.isArray(actualSrc) ? aggregateActuals(actualSrc) : actualSrc;
+  const forecast = metrics.forecast ? {
+    ...metrics.forecast,
+    confidence_low:
+      metrics.forecast.confidence_low ??
+      metrics.forecast.confidence_interval_low ?? null,
+    confidence_high:
+      metrics.forecast.confidence_high ??
+      metrics.forecast.confidence_interval_high ?? null,
+  } : metrics.forecast;
+  return { ...metrics, actual, forecast };
+};
+
+// Map full /detail wrapper → flatten + rename so legacy components keep working.
+const mapDetail = (detail) => {
+  if (!detail || typeof detail !== "object") return detail;
+  const sku = mapDetailSku(detail.sku || detail);
+  const metrics = mapMetrics(detail.metrics);
+  return {
+    ...detail,
+    ...sku, // hoist sku fields to the top level so existing components keep reading data.name, data.asin, etc.
+    sku,
+    metrics,
+    components: detail.components ?? [],
+    fees: detail.fees ?? null,
+    inventory: detail.inventory ?? null,
+    price_history: detail.price_history ?? { items: [] },
+    upcoming_promos: detail.upcoming_promos ?? [],
+  };
+};
 
 // Hook: useSkuOverview
 export const useSkuOverview = (filters) => {
@@ -288,8 +370,9 @@ export const useSkuDetail = (skuId) => {
         () => xanoFetch(`/detail?marketplace_sku_id=${encParam(safeId)}`),
         mockDetail
       );
-      setData(result);
-      setSource(result === mockDetail ? "mock" : "api");
+      const isMock = result === mockDetail;
+      setData(isMock ? result : mapDetail(result));
+      setSource(isMock ? "mock" : "api");
       setLoading(false);
     };
     load();
@@ -327,8 +410,9 @@ export const useSkuMetrics = (skuId, period = "30d", customStart, customEnd) => 
         () => xanoFetch(`/metrics?${params}`),
         mockMetrics
       );
-      setData(result);
-      setSource(result === mockMetrics ? "mock" : "api");
+      const isMock = result === mockMetrics;
+      setData(isMock ? result : mapMetrics(result));
+      setSource(isMock ? "mock" : "api");
       setLoading(false);
     };
     load();
@@ -356,7 +440,15 @@ export const useCategoryFees = (category, channel) => {
         () => xanoFetch(`/category_fees?category=${encParam(category)}&channel=${encParam(channel)}`),
         mockFees
       );
-      setFees(result);
+      // Xano may return an array (filtered table query) or a single row. Pick the most recent effective row.
+      let normalized = result;
+      if (Array.isArray(result)) {
+        if (result.length === 0) normalized = mockFees;
+        else normalized = result
+          .slice()
+          .sort((a, b) => String(b.effective_date || "").localeCompare(String(a.effective_date || "")))[0];
+      }
+      setFees(normalized);
       setLoading(false);
     };
     load();
@@ -468,6 +560,147 @@ export const useSpendForecast = () => {
   }, []);
 
   return { data, loading, source };
+};
+
+// ─────────────────────────────────────────────────────────────────────────
+// New hooks for endpoints that don't exist yet in Xano. Each falls back to
+// mock data until the corresponding endpoint is wired. When the endpoint
+// goes live, no further frontend changes are required as long as the field
+// names below match the table schemas in docs/XANO_BUILD_PLAN.md.
+// ─────────────────────────────────────────────────────────────────────────
+
+// Hook: useSpendDaily — feeds Home / Spend Command Center.
+// Expected Xano endpoint: GET /spend_daily?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+// Returns: array of rows, one per (date, channel).
+//   Fields per row: date, channel, revenue, ad_spend, units, orders,
+//                   impressions, clicks, cvr, acos, roas, aov.
+// The hook returns BOTH:
+//   .rows  — raw per-(date, channel) rows
+//   .pivot — array of one row per date with per-channel columns flattened
+//            (matches the existing R 2-D array shape in SpendCommandCenter.jsx)
+export const useSpendDaily = (startDate, endDate) => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [source, setSource] = useState(null);
+
+  useEffect(() => {
+    const load = async () => {
+      const params = [];
+      if (startDate) params.push(`start_date=${encParam(startDate)}`);
+      if (endDate) params.push(`end_date=${encParam(endDate)}`);
+      const qs = params.length ? `?${params.join("&")}` : "";
+      const result = await fetchWithFallback(
+        () => xanoFetch(`/spend_daily${qs}`),
+        []
+      );
+      const rows = Array.isArray(result) ? result : [];
+      // Pivot to one row per date with per-channel columns
+      const byDate = new Map();
+      for (const r of rows) {
+        if (!r?.date) continue;
+        if (!byDate.has(r.date)) byDate.set(r.date, { date: r.date });
+        const day = byDate.get(r.date);
+        const ch = String(r.channel || "").toLowerCase();
+        day[`${ch}_revenue`] = (day[`${ch}_revenue`] || 0) + (Number(r.revenue) || 0);
+        day[`${ch}_spend`] = (day[`${ch}_spend`] || 0) + (Number(r.ad_spend) || 0);
+        day[`${ch}_units`] = (day[`${ch}_units`] || 0) + (Number(r.units) || 0);
+        day.total_revenue = (day.total_revenue || 0) + (Number(r.revenue) || 0);
+        day.total_spend = (day.total_spend || 0) + (Number(r.ad_spend) || 0);
+        day.total_units = (day.total_units || 0) + (Number(r.units) || 0);
+        day.impressions = (day.impressions || 0) + (Number(r.impressions) || 0);
+        day.clicks = (day.clicks || 0) + (Number(r.clicks) || 0);
+        day.orders = (day.orders || 0) + (Number(r.orders) || 0);
+      }
+      const pivot = Array.from(byDate.values())
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .map((d) => ({
+          ...d,
+          acos: d.total_revenue ? (d.total_spend / d.total_revenue) * 100 : 0,
+          aov: d.orders ? d.total_revenue / d.orders : 0,
+          cvr: d.clicks ? (d.orders / d.clicks) * 100 : 0,
+        }));
+      setData({ rows, pivot });
+      setSource(rows.length === 0 ? "mock" : "api");
+      setLoading(false);
+    };
+    load();
+  }, [startDate, endDate]);
+
+  return { data, loading, source };
+};
+
+// Hook: useChannelCampaigns — feeds Channels / Channel Deep Dive.
+// Expected Xano endpoint: GET /channel_campaigns?channel=X
+// Returns array of rows from channel_campaign table.
+export const useChannelCampaigns = (channel) => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [source, setSource] = useState(null);
+
+  useEffect(() => {
+    const load = async () => {
+      const qs = channel ? `?channel=${encParam(channel)}` : "";
+      const result = await fetchWithFallback(
+        () => xanoFetch(`/channel_campaigns${qs}`),
+        []
+      );
+      setData(Array.isArray(result) ? result : []);
+      setSource(Array.isArray(result) && result.length > 0 ? "api" : "mock");
+      setLoading(false);
+    };
+    load();
+  }, [channel]);
+
+  return { data, loading, source };
+};
+
+// Hook: useInventorySnapshot — drives the Inventory card on Detail page.
+// Expected Xano endpoint: GET /inventory?marketplace_sku_id=X (or join inside /detail)
+export const useInventorySnapshot = (skuId) => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const safeId = sanitizeId(skuId);
+
+  useEffect(() => {
+    if (safeId === null) { setData(null); setLoading(false); return; }
+    const load = async () => {
+      const result = await fetchWithFallback(
+        () => xanoFetch(`/inventory?marketplace_sku_id=${encParam(safeId)}`),
+        null
+      );
+      // Xano may return an array or a single row.
+      const row = Array.isArray(result) ? result[0] : result;
+      setData(row || null);
+      setLoading(false);
+    };
+    load();
+  }, [safeId]);
+
+  return { data, loading };
+};
+
+// Hook: useGenSkuComponents — drives Components card on Detail page.
+// Expected Xano endpoint: GET /sku_components?marketplace_sku_id=X
+//   Returns array of joined rows: gen_sku + sku_component fields together.
+export const useGenSkuComponents = (skuId) => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const safeId = sanitizeId(skuId);
+
+  useEffect(() => {
+    if (safeId === null) { setData([]); setLoading(false); return; }
+    const load = async () => {
+      const result = await fetchWithFallback(
+        () => xanoFetch(`/sku_components?marketplace_sku_id=${encParam(safeId)}`),
+        []
+      );
+      setData(Array.isArray(result) ? result : []);
+      setLoading(false);
+    };
+    load();
+  }, [safeId]);
+
+  return { data, loading };
 };
 
 // Hook: useCreatePriceTest (POST callback) — with input validation
