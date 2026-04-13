@@ -4,8 +4,8 @@ import AppLayout from "./components/layout/AppLayout";
 import SkuVelocityOverview from "./pages/SkuVelocityOverview";
 import SkuVelocityDetail from "./pages/SkuVelocityDetail";
 import ComponentSkuDetail from "./pages/ComponentSkuDetail";
-import SpendForecast from "./pages/SpendForecast";
-import SpendAllocator from "./pages/SpendAllocator";
+import SpendCommandCenter from "./pages/SpendCommandCenter";
+import ChannelDeepDive from "./pages/ChannelDeepDive";
 import LoginPage from "./pages/LoginPage";
 
 function ProtectedRoute({ children }) {
@@ -55,9 +55,8 @@ export default function App() {
             <Route path="/sku-velocity/:skuId" element={<SkuVelocityDetail />} />
             <Route path="/components/:componentId" element={<ComponentSkuDetail />} />
             <Route path="/components" element={<Navigate to="/sku-velocity" replace />} />
-            <Route path="/spend-forecast" element={<SpendForecast />} />
-            <Route path="/budget-allocator" element={<SpendAllocator />} />
-            <Route path="/price-tests" element={<Navigate to="/sku-velocity" replace />} />
+            <Route path="/spend-command-center" element={<SpendCommandCenter />} />
+            <Route path="/channel-deep-dive" element={<ChannelDeepDive />} />
             <Route path="/settings" element={<Navigate to="/sku-velocity" replace />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
