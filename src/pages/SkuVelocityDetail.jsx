@@ -265,10 +265,14 @@ const PRICE_HISTORY = [
 function MarginCalc({ landed, shipping, serviceFee, adSpend, units30d, testPrice, setTestPrice, buybox, category, refPrice, nextP }) {
   const price = testPrice || buybox;
   const isTest = !!testPrice;
-  const amzFeeConfig = FEES.amazon[category];
+  // Live SKU rows can carry categories the static FEES table doesn't know
+  // about (e.g. "Base"). Fall back to bedroom_furniture so the layout still
+  // renders rather than crashing on undefined.
+  const amzFeeConfig = FEES.amazon[category] || FEES.amazon.bedroom_furniture;
+  const shopFeeConfig = FEES.shopify[category] || FEES.shopify.bedroom_furniture;
   const amzReferral = calcReferral(price, amzFeeConfig);
   const amzReferralPct = (amzReferral / price) * 100;
-  const shopProcessing = price * FEES.shopify[category].processing_pct + FEES.shopify[category].processing_flat;
+  const shopProcessing = price * shopFeeConfig.processing_pct + shopFeeConfig.processing_flat;
   const adsPerUnit = adSpend / units30d;
   const service = price * serviceFee;
   const amzNet = price - amzReferral - shipping - service - adsPerUnit - landed;
