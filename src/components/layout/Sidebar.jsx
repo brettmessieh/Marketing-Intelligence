@@ -10,10 +10,9 @@ export default function Sidebar() {
 
   const navItems = [
     { label: "SKU Velocity", path: "/sku-velocity", icon: "📊" },
-    { label: "Spend Forecast", path: "/spend-forecast", icon: "📈" },
-    { label: "Budget Allocator", path: "/budget-allocator", icon: "🎯" },
+    { label: "Spend Command Center", path: "/spend-command-center", icon: "📈" },
+    { label: "Channel Deep Dive", path: "/channel-deep-dive", icon: "🎯" },
     { label: "Components", path: "/components", icon: "🔧" },
-    { label: "Price Tests", path: "/price-tests", icon: "💰" },
     { label: "Settings", path: "/settings", icon: "⚙️" },
   ];
 
@@ -21,6 +20,7 @@ export default function Sidebar() {
     <div
       style={{
         width: "200px",
+        minWidth: "200px",
         background: T.bg2,
         borderRight: `1px solid ${T.bd}`,
         padding: "20px 0",
