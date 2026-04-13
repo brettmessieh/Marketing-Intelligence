@@ -12,9 +12,9 @@ export default function Sidebar() {
   };
 
   const navItems = [
-    { label: "Home", path: "/", icon: "🏠" },
-    { label: "Channels", path: "/channels", icon: "🎯" },
-    { label: "Products", path: "/products", icon: "📦" },
+    { label: "Home", path: "/" },
+    { label: "Channels", path: "/channels" },
+    { label: "Products", path: "/products" },
   ];
 
   return (
@@ -97,7 +97,6 @@ export default function Sidebar() {
               }
             }}
           >
-            <span style={{ fontSize: "14px" }}>{item.icon}</span>
             <span>{item.label}</span>
           </Link>
         ))}
