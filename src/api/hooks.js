@@ -270,7 +270,7 @@ export const useSkuDetail = (skuId) => {
 
   const safeId = sanitizeId(skuId);
 
-  /- useMemo prevents stale closure —"mockDetail identity is stable across renders
+  // useMemo prevents stale closure - mockDetail identity is stable across renders
   const mockDetail = useMemo(
     () => MOCK_SKU_OVERVIEW.find((sku) => sku.id === safeId) || MOCK_SKU_OVERVIEW[0],
     [safeId]
