@@ -6,14 +6,15 @@ export default function Sidebar() {
   const location = useLocation();
   const { user, logout } = useAuth();
 
-  const isActive = (path) => location.pathname === path || location.pathname.startsWith(path + "/");
+  const isActive = (path) => {
+    if (path === "/") return location.pathname === "/";
+    return location.pathname === path || location.pathname.startsWith(path + "/");
+  };
 
   const navItems = [
-    { label: "SKU Velocity", path: "/sku-velocity", icon: "📊" },
-    { label: "Spend Command Center", path: "/spend-command-center", icon: "📈" },
-    { label: "Channel Deep Dive", path: "/channel-deep-dive", icon: "🎯" },
-    { label: "Components", path: "/components", icon: "🔧" },
-    { label: "Settings", path: "/settings", icon: "⚙️" },
+    { label: "Home", path: "/", icon: "🏠" },
+    { label: "Channels", path: "/channels", icon: "🎯" },
+    { label: "Products", path: "/products", icon: "📦" },
   ];
 
   return (

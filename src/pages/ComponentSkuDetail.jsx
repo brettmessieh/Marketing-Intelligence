@@ -137,7 +137,7 @@ export default function ComponentSkuDetail() {
           fontFamily: "'Outfit', sans-serif",
         }}
       >
-        <span style={{ cursor: "pointer" }} onClick={() => navigate("/sku-velocity")}>
+        <span style={{ cursor: "pointer" }} onClick={() => navigate("/products")}>
           SKU Velocity
         </span>
         <span>›</span>
@@ -361,7 +361,7 @@ export default function ComponentSkuDetail() {
                   onMouseLeave={(e) => {
                     e.currentTarget.style.background = i % 2 === 0 ? T.bg : T.cd;
                   }}
-                  onClick={() => navigate(`/sku-velocity`)}
+                  onClick={() => navigate(`/products`)}
                 >
                   <td style={{ padding: "8px 10px", color: T.tx }}>{sku.sku}</td>
                   <td style={{ padding: "8px 10px" }}>
@@ -401,7 +401,7 @@ export default function ComponentSkuDetail() {
       {/* Back Button */}
       <div style={{ marginTop: 20 }}>
         <button
-          onClick={() => navigate("/sku-velocity")}
+          onClick={() => navigate("/products")}
           style={{
             padding: "8px 14px",
             borderRadius: 6,

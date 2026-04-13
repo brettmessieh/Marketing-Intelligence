@@ -50,14 +50,18 @@ export default function App() {
               </ProtectedRoute>
             }
           >
-            <Route path="/" element={<Navigate to="/sku-velocity" replace />} />
-            <Route path="/sku-velocity" element={<SkuVelocityOverview />} />
-            <Route path="/sku-velocity/:skuId" element={<SkuVelocityDetail />} />
+            <Route path="/" element={<SpendCommandCenter />} />
+            <Route path="/channels" element={<ChannelDeepDive />} />
+            <Route path="/products" element={<SkuVelocityOverview />} />
+            <Route path="/products/:skuId" element={<SkuVelocityDetail />} />
             <Route path="/components/:componentId" element={<ComponentSkuDetail />} />
-            <Route path="/components" element={<Navigate to="/sku-velocity" replace />} />
-            <Route path="/spend-command-center" element={<SpendCommandCenter />} />
-            <Route path="/channel-deep-dive" element={<ChannelDeepDive />} />
-            <Route path="/settings" element={<Navigate to="/sku-velocity" replace />} />
+            {/* Backward-compatible redirects */}
+            <Route path="/sku-velocity" element={<Navigate to="/products" replace />} />
+            <Route path="/sku-velocity/:skuId" element={<Navigate to="/products" replace />} />
+            <Route path="/spend-command-center" element={<Navigate to="/" replace />} />
+            <Route path="/channel-deep-dive" element={<Navigate to="/channels" replace />} />
+            <Route path="/components" element={<Navigate to="/products" replace />} />
+            <Route path="/settings" element={<Navigate to="/" replace />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

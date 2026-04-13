@@ -575,7 +575,7 @@ function MarketplaceSkuTable({ data }) {
                   cursor: "pointer",
                   transition: "background-color 0.15s",
                 }}
-                onClick={() => navigate(`/sku-velocity/${row.id}`)}
+                onClick={() => navigate(`/products/${row.id}`)}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.background = T.bd;
                 }}
